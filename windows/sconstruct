@@ -1,0 +1,60 @@
+# SConstruct for liblouis Windows builds
+# Author: James Teh <jamie@nvaccess.org>
+
+import os
+import re
+
+vars = Variables()
+vars.Add(EnumVariable("targetArch", "Target architecture", "x86", allowed_values=["x86", "x86_64"]))
+# We need an environment to get command line variables.
+env = Environment(variables=vars)
+# TARGET_ARCH has to be passed when the environment is constructed; it can't be set later.
+env = Environment(TARGET_ARCH=env["targetArch"],
+	tools=["default", "textfile"],
+	# Hack around an odd bug where some tool after msvc states that static and shared objects are different.
+	STATIC_AND_SHARED_OBJECTS_ARE_THE_SAME=1,
+	CPPFLAGS="/EHsc",
+	CPPPATH=["include"])
+
+rootDir = env.Dir("..")
+sourceDir = rootDir.Dir("liblouis")
+outDir = env.Dir("dist")
+
+RE_AC_INIT = re.compile(r"^AC_INIT\(\[(?P<package>.*)\], \[(?P<version>.*)\], \[(?P<bugReport>.*)\], \[(?P<tarName>.*)\], \[(?P<url>.*)\]\)")
+def getVersion():
+	# Get the version from configure.ac.
+	with file(rootDir.File("configure.ac").abspath) as f:
+		for line in f:
+			m = RE_AC_INIT.match(line)
+			if m:
+				return m.group("version")
+	return "unknown"
+
+env.Append(CCFLAGS="/W0")
+env.Append(CPPDEFINES=[
+	("PACKAGE_VERSION", r'\"%s\"' % getVersion()),
+	("UNICODE_BITS", 16),
+])
+env.Prepend(CPPPATH=[".", sourceDir])
+
+liblouisH = env.Substfile("liblouis.h", sourceDir.File("liblouis.h.in"),
+	SUBST_DICT={"@WIDECHAR_TYPE@": "unsigned short int"})
+
+sourceFiles = [
+	"compileTranslationTable.c",
+	"lou_translateString.c",
+	"lou_backTranslateString.c",
+	"wrappers.c",
+	"logging.c",
+]
+objs = [env.Object("%s.obj" % f, sourceDir.File(f)) for f in sourceFiles]
+louisLib = env.SharedLibrary("liblouis", objs + ["liblouis.def"])
+env.Install(outDir, louisLib)
+
+louisPython = env.Substfile(outDir.File("python/louis/__init__.py"), rootDir.File("python/louis/__init__.py.in"),
+	SUBST_DICT={"###LIBLOUIS_SONAME###": louisLib[0].name})
+
+env.Install(outDir.Dir("tables"),
+	[f for f in env.Glob("%s/tables/*" % rootDir)
+		if f.name not in ("Makefile", "Makefile.am", "Makefile.in", "README", "maketablelist.sh")
+	])

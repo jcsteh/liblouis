@@ -1,0 +1,8 @@
+liblouis.h
+*.obj
+*.dll
+*.exp
+*.lib
+*.exe
+.sconsign.dblite
+dist
